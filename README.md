@@ -1,123 +1,139 @@
-# ISST AI Tutor - Complete Project Suite
+# pie-insignia-agent
 
-An advanced AI tutoring system for the ISST (Information Systems and Software Technology) course, featuring a modern full-stack web application and comprehensive vector store management tools.
+AI tutor for the ISST course at ETSI de Telecomunicación (Universidad Politécnica de
+Madrid), built in 2025 for the Insignia educational innovation project. Students ask about
+the course in a chat, and the agent answers only from the official course documents and
+names the document it took each answer from.
 
-## 🏗️ Project Architecture
+I designed the agent and built the whole application: backend, frontend, database and
+the tooling that loads the course material. The original repository is
+[STRAST-UPM/pie-insignia-agent](https://github.com/STRAST-UPM/pie-insignia-agent).
 
-This repository contains two main components:
+## How it works
 
+```mermaid
+graph LR
+    S([Student]) --> F[React chat<br/><i>sign-in, attachments</i>]
+    F -->|POST /api/chat| B[FastAPI backend]
+    B --> A[Agent<br/><i>OpenAI Agents SDK, GPT-4o</i>]
+    A -->|file search| V[(Vector store<br/><i>course documents</i>)]
+    B -->|every turn| L[(Supabase<br/><i>chat logs</i>)]
+    F -->|auth| L
 ```
-insignia/
-├── app/                       # 🌐 Full-Stack Web Application
-│   ├── backend/               # FastAPI + OpenAI Agents
-│   ├── frontend/              # React + TypeScript + Tailwind
-│   └── supabase/              # Database migrations
-├── manage-vector-store/       # 🗂️ Vector Store Management
-│   ├── vector_manager.py      # Unified management utility
-│   └── files/                 # PDF documents for training
-```
 
-## 🚀 Quick Start
+- **Agent.** One agent built with the OpenAI Agents SDK. Its only tool is file search
+  over a vector store that holds the course PDFs, so retrieval is its single source of
+  course knowledge.
+- **Tutor behaviour.** The system prompt (`app/backend/system_prompt.txt`, in Spanish)
+  restricts answers to the official documents, asks the agent to name the document and
+  section behind each explanation, and to say so when the documents do not cover a
+  question. It also sets the teaching style: find out what the student already knows,
+  explain in small steps and check understanding before moving on.
+- **Attachments.** A student can attach PDFs and images to a question. PDF text is
+  extracted with pypdf and added to the message; images go to the model as they are.
+- **Conversations.** The backend keeps the history of each session and replays it on
+  every turn. Each question and answer is also written to a `chat_logs` table in
+  Supabase.
+- **Sign-in.** The frontend uses Supabase Auth with Google and GitHub.
 
-### 1. Web Application (Production Ready)
+## Stack
 
-Navigate to the `app/` directory and follow the setup instructions in `app/README.md`.
+| Part | Technology |
+|---|---|
+| Agent | OpenAI Agents SDK, GPT-4o, file search on an OpenAI vector store |
+| Backend | Python, FastAPI, Pydantic settings, pypdf |
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS, react-markdown |
+| Data and auth | Supabase (PostgreSQL, Auth, row-level security) |
 
-**Key Features:**
+## Run it
 
-- 🔐 **Authentication**: Supabase Auth with Google/GitHub
-- 💬 **Chat Interface**: Modern, responsive chat UI
-- 📎 **File Upload**: PDF and image processing
-- 🌙 **Dark Mode**: Theme switching
-- 📱 **Responsive**: Mobile-first design
+Requirements: Python 3.9+, Node.js 18+, an OpenAI API key and a Supabase project.
 
-### 2. Vector Store Management
-
-Use the unified vector store manager for file and vector operations:
+**1. Load the course documents.** Put the PDFs in `manage-vector-store/files/` and create
+the vector store:
 
 ```bash
 cd manage-vector-store
-python vector_manager.py setup --path files --name "ISST Materials"
+pip install -r requirements.txt
+cp .env.example .env                       # fill in OPENAI_API_KEY
+python vector_manager.py setup files "ISST materials"
 ```
 
-## 🔧 System Requirements
+`python vector_manager.py list-stores` then shows the ID of the new store, which the
+backend needs. The same tool uploads and deletes files and stores; run it with `--help`
+for the full list.
 
-- **Python 3.9+**
-- **Node.js 18+**
-- **OpenAI API Key**
-- **Supabase Account** (for production app)
+**2. Create the database.** Run `app/supabase/migrations/20250522092836_create_chat_logs_table.sql`
+in the SQL editor of the Supabase project, and enable the Google and GitHub providers in
+its authentication settings.
 
-## 📊 Component Overview
+**3. Start the backend.**
 
-### 🌐 Web Application (`app/`)
+```bash
+cd app/backend
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env                               # OpenAI key, vector store ID, Supabase keys
+python start.py                                    # http://localhost:8000
+```
 
-**Backend (FastAPI):**
+`python start.py --verify` also checks that the OpenAI API and the vector store are
+reachable before starting.
 
-- Centralized configuration management
-- Optimized file processing (PDF, images)
-- Comprehensive error handling
-- Structured logging
-- Type-safe code with Pydantic
+**4. Start the frontend.**
 
-**Frontend (React + TypeScript):**
+```bash
+cd app/frontend
+npm install
+cp .env.example .env                               # Supabase URL and anon key
+npm run dev
+```
 
-- Performance optimized components
-- Modern UI with Tailwind CSS
-- Real-time chat interface
-- File upload with preview
-- Accessibility features
+## API
 
-**Database (Supabase):**
+**`POST /api/chat`** takes a multipart form:
 
-- User authentication
-- Chat history storage
-- Row-level security
+| Field | Content |
+|---|---|
+| `pregunta` | The question (may be empty if files are attached) |
+| `session_id` | Optional; reuse it to continue a conversation |
+| `files` | Optional PDFs or images (`jpg`, `png`, `gif`, `webp`) |
 
-### 🗂️ Vector Store Management (`manage-vector-store/`)
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -F "pregunta=¿Qué es un caso de uso?" \
+  -F "session_id=demo"
+```
 
-**Unified Manager (`vector_manager.py`):**
+```json
+{ "respuesta": "...", "session_id": "demo" }
+```
 
-- File upload automation
-- Vector store creation
-- Comprehensive CLI interface
-- Error handling and logging
+**`GET /api/health`** returns the service status.
 
-## 🎯 Use Cases
+## Project structure
 
-### For Students
+```
+app/
+├── backend/               # FastAPI service and agent
+│   ├── app.py             # endpoints, attachment handling, agent setup
+│   ├── config.py          # typed settings read from .env
+│   ├── start.py           # start-up checks, then uvicorn
+│   └── system_prompt.txt  # tutor instructions
+├── frontend/              # React and TypeScript chat
+└── supabase/migrations/   # chat_logs table and its policies
+manage-vector-store/       # CLI to upload documents and manage vector stores
+```
 
-- **Interactive Learning**: Ask questions about ISST course materials
-- **Document Analysis**: Upload and analyze course PDFs
-- **Study Sessions**: Persistent conversation history
-- **Multi-modal**: Text and image-based questions
+## Limitations
 
-### For Educators
+What I would change before putting this in front of more students:
 
-- **Content Management**: Easy upload of course materials
-- **Usage Analytics**: Track student interactions
-- **Testing Interface**: Validate AI responses
-- **Customization**: Modify system prompts
-
-### For Developers
-
-- **Vector Store Management**: Comprehensive tooling
-- **API Integration**: Clean, documented endpoints
-- **Extensible Architecture**: Easy to modify and extend
-- **Testing Tools**: Multiple interfaces for development
-
-## 🧪 Testing & Development
-
-### Development Workflow
-
-1. **Vector Store Setup**: Use `vector_manager.py` to prepare materials
-2. **Backend Development**: FastAPI with hot reload
-3. **Frontend Development**: Vite with HMR
-4. **Testing**: Use the web application interface for testing
-
-### Production Deployment
-
-1. **Environment Setup**: Configure all required environment variables
-2. **Database Migration**: Apply Supabase migrations
-3. **Backend Deployment**: Deploy FastAPI with proper process management
-4. **Frontend Build**: Build and deploy static assets
-5. **Monitoring**: Set up logging and health checks
+- **History lives in memory.** Conversations are replayed from a dictionary in the
+  backend process, so they are lost on restart and a second worker would not see them.
+- **The API trusts the session ID.** `/api/chat` does not verify the signed-in user, so
+  the session ID works as identifier and credential at once.
+- **Chat logs are readable with the public key.** The migration lets anonymous clients
+  read `chat_logs`; reads should be limited to staff.
+- **No automated tests.** Answers were evaluated against a fixed set of test questions,
+  outside this repository.
